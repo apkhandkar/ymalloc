@@ -1,5 +1,6 @@
 #include <stdio.h>
 #include <stdlib.h>
+#include <assert.h>
 
 /* 32MB ought to be plenty to begin with */
 #define YALLOC_BLOCK_SIZE 1024*1024*32
@@ -43,12 +44,9 @@ void * ymalloc(ssize_t size)
   	while(temp != (MEM + SIZE)) {
 
 		header = temp;
-
-		if((blocksize = (header->next) - (temp + sizeof(struct bhead))) < 0) {
-			/* negative blocksize? how?? */
-			return NULL;
-			/* or does this warrant an exit(-1)? */
-		}
+		
+		/* blocksize cannot be negative */
+		assert((blocksize = (header->next) - (temp + sizeof(struct bhead))) >= 0);
 
 		if((size + sizeof(struct bhead)) < blocksize && (header->free == '1')) {
 

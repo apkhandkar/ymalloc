@@ -17,11 +17,14 @@ void * MEM;
 unsigned int SIZE;
 
 int INITIATED = 0;
-int WARNING_PRINTED = 0;
 
-void * yalloc(ssize_t size) 
+void 
+*yalloc(ssize_t size) 
 {
+#ifdef SUPRESS_YMALLOC_WARNING
+#else
 	printf("\n***warning: this program uses ymalloc(), use allocated heap VERY carefully***\n\n"); 
+#endif
 	void * MEM = malloc(size);
 	SIZE = size;
 	struct bhead * header = MEM;
@@ -32,7 +35,8 @@ void * yalloc(ssize_t size)
 	return MEM;
 }
  
-void * ymalloc(ssize_t size)
+void 
+*ymalloc(ssize_t size)
 {
 	if(INITIATED == 0) {
 		INITIATED = 1;
@@ -97,7 +101,8 @@ void * ymalloc(ssize_t size)
   	return NULL;
 }
 
-void merge()
+void 
+merge()
 {
   	struct bhead * header, * next_header;
   	void * temp = MEM;
@@ -106,7 +111,7 @@ void merge()
   	while(temp != (MEM + SIZE)) {
 		header = temp;
   
-		assert("integrity check" && (header->integrity_chk == SHRT_MAX));
+		assert("[<-yfree] integrity check" && (header->integrity_chk == SHRT_MAX));
 
 		next_block = header->next;
 		next_header = next_block;
@@ -122,7 +127,8 @@ void merge()
   	}
 }
 
-void yfree(void * addr)
+void 
+yfree(void * addr)
 {
   	struct bhead * header;
   	void * temp = MEM;
@@ -164,7 +170,8 @@ void yfree(void * addr)
 	}
 }
 
-void mem_map()
+void 
+mem_map()
 {
   	struct bhead * header;
  	void * temp = MEM;
@@ -192,14 +199,23 @@ void mem_map()
 	printf("\n");
 }
 
-void ymalloc_summary()
+void 
+ymalloc_summary()
 {
+	/* in bytes, */
+	/* total allocation */
 	ssize_t sz_total = 0;
+	/* space taken up by block headers */
 	ssize_t sz_headr = 0;
+	/* out of that, space taken up by headers of occupied blocks */
 	ssize_t sz_hoccs = 0;
+	/* space taken up by headers of free blocks */
 	ssize_t sz_hfree = 0;
+	/* space available to  blocks */
 	ssize_t sz_bloks = 0;
+	/* space taken up by occupied blocks */
 	ssize_t sz_blkoc = 0;
+	/* total space in free block(s) */
 	ssize_t sz_blkfr = 0;
 
 	ssize_t blocksize = 0;
@@ -240,8 +256,8 @@ void ymalloc_summary()
 	printf("     [in free blocks]: %d\n", sz_blkfr);
 	printf(" [in occupied blocks]: %d\n", sz_blkoc);
 	printf("Header size          : %d\n", sz_headr);
-	printf("    [in free headers]: %d\n", sz_hfree);
-	printf("[in occupied headers]: %d\n", sz_hoccs);
+	printf("  [for free block(s)]: %d\n", sz_hfree);
+	printf("[for occupied blocks]: %d\n", sz_hoccs);
 	printf("Total size           : %d\n", sz_total);
 	printf("Free                 ~ %.0f%%\n", pcfree);
 

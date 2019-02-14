@@ -81,7 +81,8 @@ void * ymalloc(ssize_t size)
 	  		/* block isn't free or isn't large enough */
 		}
 
-		temp = header->next;
+		/* sanity check - are we jumping out of our block? */
+		assert((temp = header->next) <= (MEM + SIZE));
 	}
 
 	/* follow the malloc() spec and return NULL upon failure to allocate */
@@ -107,7 +108,8 @@ void merge()
 	  		header->next = next_header->next;    
 		} 
 
-		temp = header->next;
+		/* sanity check - are we jumping out of our block? */
+		assert((temp = header->next) <= (MEM + SIZE));
   	}
 }
 

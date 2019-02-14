@@ -1,4 +1,5 @@
-/* ymalloc-test: demonstrates the simple header integrity
+/** 
+ * ymalloc-test: demonstrates the simple header integrity
  * check mechanism built into ymalloc
  */
 

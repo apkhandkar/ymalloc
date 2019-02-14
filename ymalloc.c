@@ -3,6 +3,10 @@
  * --------------------
  * Blocks are linked in two interspersed forward-link chains and
  * one backward-link chain.
+ * 
+ * Also, yfree_safe: a more agressive version of yfree() that 
+ * zeroes out the memory being freed and realigns the passed 
+ * pointer to NULL.
  */
 
 #include <stdio.h>
@@ -10,6 +14,7 @@
 #include <math.h>
 #include <assert.h>
 #include <limits.h>
+#include <string.h>
 
 /* 32MB ought to be plenty to begin with */
 #define YALLOC_BLOCK_SIZE 1024*1024*32
@@ -17,11 +22,25 @@
 struct bhead {
 	short int integrity_chk;
 	char free;
+	/* 
+		headers for free blocks forward-link to headers to next free block,
+		and the same for occupied blocks
+	 */
 	void * next;
+	/* 	
+		headers for a block backwards-link to the previous block, regardless 
+		of its occupancy
+	*/
+	void * prev;
 };
 
 void * MEM;
 unsigned int SIZE;
+
+void *HEAD, *TAIL;
+void *FOHEAD, *FOTAIL;
+void *FFHEAD, *FFTAIL;
+void *BHEAD, *BTAIL;
 
 int INITIATED = 0;
 
@@ -154,6 +173,54 @@ yfree(void * addr)
 				/* this is the block we wish to free */
 				header->free = '1';
 				merge();
+
+			} else {
+				/* seems we're trying to free a free block, do nothing for now */
+			}
+
+			/* the address passed was allocated using ymalloc() */
+			visited = 1;		
+
+		}
+
+		/* sanity check - are we jumping out of our block? */
+		assert((temp = header->next) <= (MEM + SIZE)); 
+  	}
+
+	if(visited == 0) {
+		/* the address passed wasn't allocated using ymalloc() */
+		fprintf(stderr, "ymalloc: error: yfree(): invalid pointer: %p\n",
+			addr);
+	}
+}
+
+
+void 
+yfree_safe(void * addr)
+{
+  	struct bhead * header;
+  	void * temp = MEM;
+	ssize_t blocksize;
+
+	int visited = 0;
+
+  	while(temp != (MEM + SIZE)) {
+		header = temp;
+
+		assert("integrity check" && (header->integrity_chk == SHRT_MAX));
+
+		assert((blocksize = (header->next) - (temp + sizeof(struct bhead))) >= 0);
+
+		if((temp + sizeof(struct bhead)) == addr) {
+
+			if(header->free == '0') {
+
+				/* this is the block we wish to free */
+				header->free = '1';
+				merge();
+
+				/* zero out the block */
+				memset(addr, (int) '\0', blocksize);
 
 			} else {
 				/* seems we're trying to free a free block, do nothing for now */

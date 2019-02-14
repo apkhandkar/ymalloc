@@ -1,3 +1,10 @@
+/** 
+ * YMALLOC-EXPERIMENTAL
+ * --------------------
+ * Blocks are linked in two interspersed forward-link chains and
+ * one backward-link chain.
+ */
+
 #include <stdio.h>
 #include <stdlib.h>
 #include <math.h>

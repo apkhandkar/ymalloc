@@ -1,11 +1,14 @@
 #include <stdio.h>
 #include <stdlib.h>
+#include <math.h>
 #include <assert.h>
+#include <limits.h>
 
 /* 32MB ought to be plenty to begin with */
 #define YALLOC_BLOCK_SIZE 1024*1024*32
 
 struct bhead {
+	short int errchk;
 	char free;
 	void * next;
 };
@@ -22,6 +25,7 @@ void * yalloc(ssize_t size)
 	void * MEM = malloc(size);
 	SIZE = size;
 	struct bhead * header = MEM;
+	header->errchk = SHRT_MAX;
 	header->free = '1';
 	header->next = (MEM + SIZE);
  
@@ -44,7 +48,10 @@ void * ymalloc(ssize_t size)
   	while(temp != (MEM + SIZE)) {
 
 		header = temp;
-		
+
+		/* has part of the header been overwritten? */
+		assert("block header overwrite" && (header->errchk == SHRT_MAX));
+
 		/* blocksize cannot be negative */
 		assert((blocksize = (header->next) - (temp + sizeof(struct bhead))) >= 0);
 
@@ -62,6 +69,7 @@ void * ymalloc(ssize_t size)
 
 	  		/* create a header for the newly created free block */
 	  		header = (temp + sizeof(struct bhead) + size);
+			header->errchk = SHRT_MAX;
 			/* mark it as a free block */
 	  		header->free = '1';
 	  		header->next = curr_next;
@@ -98,6 +106,8 @@ void merge()
   	while(temp != (MEM + SIZE)) {
 		header = temp;
   
+		assert("block header overwrite" && (header->errchk == SHRT_MAX));
+
 		next_block = header->next;
 		next_header = next_block;
   
@@ -108,7 +118,6 @@ void merge()
 	  		header->next = next_header->next;    
 		} 
 
-		/* sanity check - are we jumping out of our block? */
 		assert((temp = header->next) <= (MEM + SIZE));
   	}
 }
@@ -122,6 +131,8 @@ void yfree(void * addr)
 
   	while(temp != (MEM + SIZE)) {
 		header = temp;
+
+		assert("block header overwrite" && (header->errchk == SHRT_MAX));
 
 		if((temp + sizeof(struct bhead)) == addr) {
 
@@ -140,7 +151,8 @@ void yfree(void * addr)
 
 		}
 
-		temp = header->next;  
+		/* sanity check - are we jumping out of our block? */
+		assert((temp = header->next) <= (MEM + SIZE)); 
   	}
 
 	if(visited == 0) {
@@ -163,7 +175,9 @@ void mem_map()
   	while(temp != (MEM + SIZE)) {
 		header = temp;
 
-		blocksize = (header->next) - (temp + sizeof(struct bhead)); 
+		assert("block header overwrite" && (header->errchk == SHRT_MAX));
+
+		assert((blocksize = (header->next) - (temp + sizeof(struct bhead))) >= 0);
 
 		printf("\n-------Block-------\n");
 		printf("Address: %p\n", temp);
@@ -172,7 +186,7 @@ void mem_map()
 		printf("Block size: %ld\n", blocksize);
 		printf("-------------------\n\n");
  
-		temp = header->next;
+		assert((temp = header->next) <= (MEM + SIZE));
   	}
 
 	printf("\n");
@@ -188,7 +202,9 @@ void ymalloc_summary()
 	ssize_t sz_blkoc = 0;
 	ssize_t sz_blkfr = 0;
 
-	ssize_t blocksize;
+	ssize_t blocksize = 0;
+
+	float pcfree = 0;
 
 	void * temp = MEM;
 	struct bhead *header;	
@@ -196,7 +212,9 @@ void ymalloc_summary()
 	while (temp != (MEM + SIZE)) {
 		header = temp;
 
-		blocksize = (header->next) - (temp + sizeof(struct bhead));
+		assert("block header overwrite" && (header->errchk == SHRT_MAX));
+
+		assert((blocksize = (header->next) - (temp + sizeof(struct bhead))) >= 0);
 
 		if(header->free == '1') {
 			sz_blkfr += blocksize;
@@ -211,8 +229,10 @@ void ymalloc_summary()
 
 		sz_total += sizeof(struct bhead) + blocksize;
 
-		temp = header->next;
+		assert((temp = header->next) <= (MEM + SIZE));
 	}
+
+	pcfree = ((float)(sz_total - (sz_blkoc + sz_headr)) / (float)sz_total) * 100;
 
 	printf("\n");
 	printf("***ymalloc: usage summary***\n");
@@ -223,6 +243,8 @@ void ymalloc_summary()
 	printf("    [in free headers]: %d\n", sz_hfree);
 	printf("[in occupied headers]: %d\n", sz_hoccs);
 	printf("Total size           : %d\n", sz_total);
+	printf("Free                 ~ %.0f%%\n", pcfree);
+
 	printf("\n");
 
 	return;

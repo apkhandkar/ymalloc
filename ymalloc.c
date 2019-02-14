@@ -165,8 +165,6 @@ yfree(void * addr)
 		/* the address passed wasn't allocated using ymalloc() */
 		fprintf(stderr, "ymalloc: error: yfree(): invalid pointer: %p\n",
 			addr);
-		/* we can't deal with this shit anymore */
-		exit(-1);
 	}
 }
 

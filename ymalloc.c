@@ -8,7 +8,7 @@
 #define YALLOC_BLOCK_SIZE 1024*1024*32
 
 struct bhead {
-	short int errchk;
+	short int integrity_chk;
 	char free;
 	void * next;
 };
@@ -25,7 +25,7 @@ void * yalloc(ssize_t size)
 	void * MEM = malloc(size);
 	SIZE = size;
 	struct bhead * header = MEM;
-	header->errchk = SHRT_MAX;
+	header->integrity_chk = SHRT_MAX;
 	header->free = '1';
 	header->next = (MEM + SIZE);
  
@@ -49,8 +49,8 @@ void * ymalloc(ssize_t size)
 
 		header = temp;
 
-		/* has part of the header been overwritten? */
-		assert("block header overwrite" && (header->errchk == SHRT_MAX));
+		/* perform a header integrity check */
+		assert("integrity check" && (header->integrity_chk == SHRT_MAX));
 
 		/* blocksize cannot be negative */
 		assert((blocksize = (header->next) - (temp + sizeof(struct bhead))) >= 0);
@@ -69,7 +69,7 @@ void * ymalloc(ssize_t size)
 
 	  		/* create a header for the newly created free block */
 	  		header = (temp + sizeof(struct bhead) + size);
-			header->errchk = SHRT_MAX;
+			header->integrity_chk = SHRT_MAX;
 			/* mark it as a free block */
 	  		header->free = '1';
 	  		header->next = curr_next;
@@ -106,7 +106,7 @@ void merge()
   	while(temp != (MEM + SIZE)) {
 		header = temp;
   
-		assert("block header overwrite" && (header->errchk == SHRT_MAX));
+		assert("integrity check" && (header->integrity_chk == SHRT_MAX));
 
 		next_block = header->next;
 		next_header = next_block;
@@ -132,7 +132,7 @@ void yfree(void * addr)
   	while(temp != (MEM + SIZE)) {
 		header = temp;
 
-		assert("block header overwrite" && (header->errchk == SHRT_MAX));
+		assert("integrity check" && (header->integrity_chk == SHRT_MAX));
 
 		if((temp + sizeof(struct bhead)) == addr) {
 
@@ -175,7 +175,7 @@ void mem_map()
   	while(temp != (MEM + SIZE)) {
 		header = temp;
 
-		assert("block header overwrite" && (header->errchk == SHRT_MAX));
+		assert("integrity check" && (header->integrity_chk == SHRT_MAX));
 
 		assert((blocksize = (header->next) - (temp + sizeof(struct bhead))) >= 0);
 
@@ -212,7 +212,7 @@ void ymalloc_summary()
 	while (temp != (MEM + SIZE)) {
 		header = temp;
 
-		assert("block header overwrite" && (header->errchk == SHRT_MAX));
+		assert("integrity check" && (header->integrity_chk == SHRT_MAX));
 
 		assert((blocksize = (header->next) - (temp + sizeof(struct bhead))) >= 0);
 

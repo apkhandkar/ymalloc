@@ -46,6 +46,42 @@ void *BHEAD, *BTAIL;
 
 int _ym_init = 0;
 
+
+
+void
+*_get_mem(ssize_t size)
+{
+	int zerofd = -1;
+	void * mem = NULL;
+
+	assert((zerofd = open("/dev/zero", O_RDWR, 0)) > 0);
+
+#if defined(__linux__)
+
+	mem = mmap(NULL, size, PROT_READ|PROT_WRITE, MAP_PRIVATE, zerofd, 0);
+
+#elif defined(__unix__) || defined((__APPLE__) && defined(__MACH__))
+
+	mem = mmap(NULL, size, PROT_READ|PROT_WRITE, MAP_ANONYMOUS, -1, 0);
+
+#endif 
+
+	/* in case we fail to get memory */
+	assert(mem != MAP_FAILED || mem != NULL);
+
+	/**
+	 * If sbrk() or mmap() prove to be too iffy to deal with, ask
+	 * for a managed chunk of heap politely from malloc, at which
+	 * point ymalloc() turns into more of a simulation
+	 *
+	 * void * mem = malloc(size);
+	 */
+
+	return mem;
+}
+
+
+
 void 
 *_ymalloc_init(ssize_t size) 
 {
@@ -55,31 +91,7 @@ void
 	printf("\n***warning: this program uses ymalloc(), use allocated heap VERY carefully***\n\n"); 
 #endif
 
-	int zerofd = -1;
-	void * got_addr = NULL;
-
-	assert((zerofd = open("/dev/zero", O_RDWR, 0)) > 0);
-
-#if defined(__linux__)
-
-	got_addr = mmap(NULL, size, PROT_READ|PROT_WRITE, MAP_PRIVATE, zerofd, 0);
-
-#elif defined(__unix__) || defined((__APPLE__) && defined(__MACH__))
-
-	got_addr = mmap(NULL, size, PROT_READ|PROT_WRITE, MAP_ANONYMOUS, -1, 0);
-
-#endif 
-
-	/* in case we fail to get memory */
-	assert(got_addr != MAP_FAILED || got_addr != NULL);
-
-	/**
-	 * If sbrk() or mmap() prove to be too iffy to deal with, ask
-	 * for a managed chunk of heap politely from malloc, at which
-	 * point ymalloc() turns into more of a simulation
-	 *
-	 * void * got_addr = malloc(size);
-	 */
+	void *got_addr = _get_mem(size);
 
 	_ym_size = size;
 	struct bhead * header = got_addr;
@@ -89,6 +101,8 @@ void
  
 	return got_addr;
 }
+
+
  
 void 
 *ymalloc(ssize_t size)
@@ -114,7 +128,7 @@ void
 		header = temp;
 
 		/* perform a header integrity check */
-		assert("integrity check" && (header->integrity_chk == SHRT_MAX));
+		assert(header->integrity_chk == SHRT_MAX);
 
 		/* blocksize cannot be negative */
 		assert((blocksize = (header->next) - (temp + sizeof(struct bhead))) >= 0);
@@ -161,8 +175,10 @@ void
   	return NULL;
 }
 
+
+
 void 
-merge()
+_merge(void)
 {
   	struct bhead * header, * next_header;
   	void * temp = _ym_base;
@@ -171,7 +187,7 @@ merge()
   	while(temp != (_ym_base + _ym_size)) {
 		header = temp;
   
-		assert("[<-yfree] integrity check" && (header->integrity_chk == SHRT_MAX));
+		assert(header->integrity_chk == SHRT_MAX);
 
 		next_block = header->next;
 		next_header = next_block;
@@ -179,7 +195,7 @@ merge()
 		/* check if both current and next blocks are free */
 		if((header->free == '1') && (next_header->free == '1')) {
 
-	  		/* if so, merge them into one large free block */
+	  		/* if so, coalesce them into one large free block */
 	  		header->next = next_header->next;    
 		} 
 
@@ -187,91 +203,70 @@ merge()
   	}
 }
 
-void
-yfree(void * addr)
-{
-  	struct bhead * header;
-  	void * temp = _ym_base;
 
-	int visited = 0;
+
+int
+_yfree_internal(void *addr, ssize_t *bsize)
+{
+  	struct bhead *bh;
+  	void *temp = _ym_base;
 
   	while(temp != (_ym_base + _ym_size)) {
-		header = temp;
 
-		assert("integrity check" && (header->integrity_chk == SHRT_MAX));
+		bh = temp;
+
+		assert(bh->integrity_chk == SHRT_MAX);
+		assert((*bsize = (bh->next) - (temp + sizeof(struct bhead))) >= 0);
 
 		if((temp + sizeof(struct bhead)) == addr) {
 
-			if(header->free == '0') {
+			if(bh->free == '0') {
 
 				/* this is the block we wish to free */
-				header->free = '1';
-				merge();
+				bh->free = '1';
+				_merge();
 
-			} else {
-				/* seems we're trying to free a free block, do nothing for now */
+				return 0;
 			}
 
-			/* the address passed was allocated using ymalloc() */
-			visited = 1;		
-
+			return 1;
 		}
 
-		/* sanity check - are we jumping out of our block? */
-		assert((temp = header->next) <= (_ym_base + _ym_size)); 
+		assert((temp = bh->next) <= (_ym_base + _ym_size)); 
   	}
 
-	if(visited == 0) {
-		fprintf(stderr, "ymalloc: error: yfree(): invalid pointer: %p\n", addr);
+	return -1;
+}
+
+
+
+void
+yfree(void *at)
+{
+	ssize_t blocksize;
+	int yfree_internal_status = _yfree_internal(at, &blocksize);
+
+	if(yfree_internal_status < 0) {
+		fprintf(stderr, "yfree: invalid pointer: %p\n", at);
 	}
 }
+
+
 
 void 
-yfree_safe(void *addr)
+yfree_safe(void *at)
 {
-  	struct bhead * header;
-  	void * temp = _ym_base;
 	ssize_t blocksize;
+	int yfree_internal_status = _yfree_internal(at, &blocksize);
 
-	int visited = 0;
-
-  	while(temp != (_ym_base + _ym_size)) {
-		header = temp;
-
-		assert("integrity check" && (header->integrity_chk == SHRT_MAX));
-
-		assert((blocksize = (header->next) - (temp + sizeof(struct bhead))) >= 0);
-
-		if((temp + sizeof(struct bhead)) == addr) {
-
-			if(header->free == '0') {
-
-				/* this is the block we wish to free */
-				header->free = '1';
-				merge();
-
-				/* zero out the block */
-				memset(addr, (int) '\0', blocksize);
-
-			} else {
-				/* seems we're trying to free a free block, do nothing for now */
-			}
-
-			/* the address passed was allocated using ymalloc() */
-			visited = 1;		
-
-		}
-
-		/* sanity check - are we jumping out of our block? */
-		assert((temp = header->next) <= (_ym_base + _ym_size)); 
-  	}
-
-	if(visited == 0) {
-		/* the address passed wasn't allocated using ymalloc() */
-		fprintf(stderr, "ymalloc: error: yfree_safe(): invalid pointer: %p\n",
-			addr);
+	if(!yfree_internal_status) {
+		memset(at, (int) '\0', blocksize);
+	} else if(yfree_internal_status < 0) {
+		fprintf(stderr, "yfree_safe: invalid pointer: %p\n", at);	
 	}
 }
+
+
 
 void 
 mem_map()
@@ -285,7 +280,7 @@ mem_map()
   	while(temp != (_ym_base + _ym_size)) {
 		header = temp;
 
-		assert("integrity check" && (header->integrity_chk == SHRT_MAX));
+		assert(header->integrity_chk == SHRT_MAX);
 
 		assert((blocksize = (header->next) - (temp + sizeof(struct bhead))) >= 0);
 
@@ -301,6 +296,8 @@ mem_map()
 
 	printf("\n");
 }
+
+
 
 void 
 ymalloc_summary()
@@ -331,7 +328,7 @@ ymalloc_summary()
 	while (temp != (_ym_base + _ym_size)) {
 		header = temp;
 
-		assert("integrity check" && (header->integrity_chk == SHRT_MAX));
+		assert(header->integrity_chk == SHRT_MAX);
 
 		assert((blocksize = (header->next) - (temp + sizeof(struct bhead))) >= 0);
 

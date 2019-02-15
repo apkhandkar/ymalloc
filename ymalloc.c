@@ -49,7 +49,7 @@ int _ym_init = 0;
 
 
 void
-*_get_mem(ssize_t size)
+*_get_mem(size_t size)
 {
 	int zerofd = -1;
 	void * mem = NULL;
@@ -69,21 +69,13 @@ void
 	/* in case we fail to get memory */
 	assert(mem != MAP_FAILED || mem != NULL);
 
-	/**
-	 * If sbrk() or mmap() prove to be too iffy to deal with, ask
-	 * for a managed chunk of heap politely from malloc, at which
-	 * point ymalloc() turns into more of a simulation
-	 *
-	 * void * mem = malloc(size);
-	 */
-
 	return mem;
 }
 
 
 
 void 
-*_ymalloc_init(ssize_t size) 
+*_ymalloc_init(size_t size) 
 {
 
 #ifdef SUPRESS_YMALLOC_WARNING
@@ -105,48 +97,46 @@ void
 
  
 void 
-*ymalloc(ssize_t size)
+*ymalloc(size_t size)
 {
-	/* sanity check - were we passed a negative size? */
-	if(size < 0) {
-		return NULL;
-	}
-
 	if(!_ym_init) {
 		_ym_init = 1;
 		_ym_base = _ymalloc_init(_YM_SET_SIZE);
   	}
 
   	struct bhead * bh;
-  	void * temp = _ym_base;
+  	void * tmp = _ym_base;
  	void * retadd;
   	void * curr_next;
-  	ssize_t bsize;
+  	size_t bsize;
   
-  	while(temp != (_ym_base + _ym_size)) {
+  	while(tmp != (_ym_base + _ym_size)) {
 
-		bh = temp;
+		bh = tmp;
 
 		/* perform a header integrity check */
 		assert(bh->integrity_chk == SHRT_MAX);
 
-		/* blocksize cannot be negative */
-		assert((bsize = (bh->next) - (temp + sizeof(struct bhead))) >= 0);
+		/* sanity check: 'next' address must be higher than current */
+		/* zero-sized blocks are not allowed */
+		assert((bh->next) > (tmp + sizeof(struct bhead)));
 
-		if((size + (2 * sizeof(struct bhead)) + 1) < bsize && (bh->free == '1')) {
+		bsize = (bh->next) - (tmp + sizeof(struct bhead));
+
+		if(((sizeof(struct bhead) + size) < bsize) && (bh->free == '1')) {
 
 			/* block is larger than what we need, split it into two */
-	  		retadd = temp + sizeof(struct bhead);
+	  		retadd = tmp + sizeof(struct bhead);
 	  
 	  		curr_next = bh->next;
 
 	  		/* resized block isn't free anymore */
 	  		bh->free = '0';
 	  		/* point to the free block that was created after the split */
-	  		bh->next = temp + sizeof(struct bhead) + size;
+	  		bh->next = tmp + sizeof(struct bhead) + size;
 
 	  		/* create a header for the newly created free block */
-	  		bh = (temp + sizeof(struct bhead) + size);
+	  		bh = (tmp + sizeof(struct bhead) + size);
 			bh->integrity_chk = SHRT_MAX;
 			/* mark it as a free block */
 	  		bh->free = '1';
@@ -154,11 +144,10 @@ void
 
 	  		return retadd;
 	  
-		} else if(((size == bsize) || ((size + sizeof(struct bhead)) < bsize)) 
-			&& (bh->free == '1')) {
+		} else if((size == bsize) && (bh->free == '1')) {
 
 	  		/* perfect fit OR allocate a little more than what was asked */
-	  		retadd = temp + sizeof(struct bhead);
+	  		retadd = tmp + sizeof(struct bhead);
   
 	 	 	bh->free = '0';
 	  
@@ -169,10 +158,10 @@ void
 		}
 
 		/* sanity check - are we jumping out of our block? */
-		assert((temp = bh->next) <= (_ym_base + _ym_size));
+		assert((tmp = bh->next) <= (_ym_base + _ym_size));
 	}
 
-	/* follow the malloc() spec and return NULL upon failure to allocate */
+	/* return NULL upon failure to allocate */
   	return NULL;
 }
 
@@ -182,11 +171,11 @@ void
 _merge(void)
 {
   	struct bhead * bh, * next_bh;
-  	void * temp = _ym_base;
+  	void * tmp = _ym_base;
   	void * next_block;
   
-  	while(temp != (_ym_base + _ym_size)) {
-		bh = temp;
+  	while(tmp != (_ym_base + _ym_size)) {
+		bh = tmp;
   
 		assert(bh->integrity_chk == SHRT_MAX);
 
@@ -200,26 +189,28 @@ _merge(void)
 	  		bh->next = next_bh->next;    
 		} 
 
-		assert((temp = bh->next) <= (_ym_base + _ym_size));
+		assert((tmp = bh->next) <= (_ym_base + _ym_size));
   	}
 }
 
 
 
 int
-_yfree_internal(void *addr, ssize_t *bsize)
+_yfree_internal(void *addr, size_t *bsize)
 {
   	struct bhead *bh;
-  	void *temp = _ym_base;
+  	void *tmp = _ym_base;
 
-  	while(temp != (_ym_base + _ym_size)) {
+  	while(tmp != (_ym_base + _ym_size)) {
 
-		bh = temp;
+		bh = tmp;
 
 		assert(bh->integrity_chk == SHRT_MAX);
-		assert((*bsize = (bh->next) - (temp + sizeof(struct bhead))) >= 0);
+		assert((bh->next) > (tmp + sizeof(struct bhead)));
 
-		if((temp + sizeof(struct bhead)) == addr) {
+		*bsize = (bh->next) - (tmp + sizeof(struct bhead));
+
+		if((tmp + sizeof(struct bhead)) == addr) {
 
 			if(bh->free == '0') {
 
@@ -233,7 +224,7 @@ _yfree_internal(void *addr, ssize_t *bsize)
 			return 1;
 		}
 
-		assert((temp = bh->next) <= (_ym_base + _ym_size)); 
+		assert((tmp = bh->next) <= (_ym_base + _ym_size)); 
   	}
 
 	return -1;
@@ -244,7 +235,7 @@ _yfree_internal(void *addr, ssize_t *bsize)
 void
 yfree(void *at)
 {
-	ssize_t blocksize;
+	size_t blocksize;
 	int yfree_internal_status = _yfree_internal(at, &blocksize);
 
 	if(yfree_internal_status < 0) {
@@ -257,7 +248,7 @@ yfree(void *at)
 void 
 yfree_safe(void *at)
 {
-	ssize_t blocksize;
+	size_t blocksize;
 	int yfree_internal_status = _yfree_internal(at, &blocksize);
 
 	if(!yfree_internal_status) {
@@ -273,26 +264,28 @@ void
 mem_map()
 {
   	struct bhead * bh;
- 	void * temp = _ym_base;
-  	ssize_t blocksize;
+ 	void * tmp = _ym_base;
+  	size_t blocksize;
 
 	printf("\n");
 	printf("***ymalloc: allocation map***\n");
-  	while(temp != (_ym_base + _ym_size)) {
-		bh = temp;
+  	while(tmp != (_ym_base + _ym_size)) {
+		bh = tmp;
 
 		assert(bh->integrity_chk == SHRT_MAX);
 
-		assert((blocksize = (bh->next) - (temp + sizeof(struct bhead))) >= 0);
+		assert((bh->next) > (tmp + sizeof(struct bhead)));
+		blocksize = (bh->next) - (tmp + sizeof(struct bhead));
 
 		printf("\n-------Block-------\n");
-		printf("Address: %p\n", temp);
+		printf("Address: %p\n", tmp);
 		printf("Header Information:\n  'Free': %s\n", ((bh->free == '1') ? "yes" : "no"));
 		printf("  'Next': %p\n", bh->next);
 		printf("Block size: %ld\n", blocksize);
+		printf("[with header]: %ld\n", blocksize + sizeof(struct bhead));
 		printf("-------------------\n\n");
  
-		assert((temp = bh->next) <= (_ym_base + _ym_size));
+		assert((tmp = bh->next) <= (_ym_base + _ym_size));
   	}
 
 	printf("\n");
@@ -305,33 +298,34 @@ ymalloc_summary()
 {
 	/* in bytes, */
 	/* total allocation */
-	ssize_t sz_total = 0;
+	size_t sz_total = 0;
 	/* space taken up by block headers */
-	ssize_t sz_headr = 0;
+	size_t sz_headr = 0;
 	/* out of that, space taken up by headers of occupied blocks */
-	ssize_t sz_hoccs = 0;
+	size_t sz_hoccs = 0;
 	/* space taken up by headers of free blocks */
-	ssize_t sz_hfree = 0;
+	size_t sz_hfree = 0;
 	/* space available to  blocks */
-	ssize_t sz_bloks = 0;
+	size_t sz_bloks = 0;
 	/* space taken up by occupied blocks */
-	ssize_t sz_blkoc = 0;
+	size_t sz_blkoc = 0;
 	/* total space in free block(s) */
-	ssize_t sz_blkfr = 0;
+	size_t sz_blkfr = 0;
 
-	ssize_t blocksize = 0;
+	size_t blocksize = 0;
 
 	float pcfree = 0;
 
-	void * temp = _ym_base;
+	void * tmp = _ym_base;
 	struct bhead *bh;	
 
-	while (temp != (_ym_base + _ym_size)) {
-		bh = temp;
+	while (tmp != (_ym_base + _ym_size)) {
+		bh = tmp;
 
 		assert(bh->integrity_chk == SHRT_MAX);
 
-		assert((blocksize = (bh->next) - (temp + sizeof(struct bhead))) >= 0);
+		assert((bh->next) > (tmp + sizeof(struct bhead)));
+		blocksize = (bh->next) - (tmp + sizeof(struct bhead));
 
 		if(bh->free == '1') {
 			sz_blkfr += blocksize;
@@ -346,7 +340,7 @@ ymalloc_summary()
 
 		sz_total += sizeof(struct bhead) + blocksize;
 
-		assert((temp = bh->next) <= (_ym_base + _ym_size));
+		assert((tmp = bh->next) <= (_ym_base + _ym_size));
 	}
 
 	pcfree = ((float)(sz_total - (sz_blkoc + sz_headr)) / (float)sz_total) * 100;

@@ -133,7 +133,7 @@ void
 		/* blocksize cannot be negative */
 		assert((blocksize = (header->next) - (temp + sizeof(struct bhead))) >= 0);
 
-		if((size + sizeof(struct bhead)) < blocksize && (header->free == '1')) {
+		if((size + (2 * sizeof(struct bhead)) + 1) < blocksize && (header->free == '1')) {
 
 			/* block is larger than what we need, split it into two */
 	  		alloc_addr = temp + sizeof(struct bhead);
@@ -154,17 +154,16 @@ void
 
 	  		return alloc_addr;
 	  
-		} else if(size == blocksize && (header->free == '1')) {
+		} else if(((size == blocksize) || ((size + sizeof(struct bhead)) < blocksize)) 
+			&& (header->free == '1')) {
 
-	  		/* perfect fit: get the address we need and flip the status bit */
+	  		/* perfect fit OR allocate a little more than what was asked */
 	  		alloc_addr = temp + sizeof(struct bhead);
   
 	 	 	header->free = '0';
 	  
 	  		return alloc_addr;
 	  
-		} else {
-	  		/* block isn't free or isn't large enough */
 		}
 
 		/* sanity check - are we jumping out of our block? */

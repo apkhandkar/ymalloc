@@ -19,7 +19,7 @@
 #include <unistd.h>
 
 /* 16MB ought to be plenty to begin with */
-#define YALLOC_BLOCK_SIZE 1024*1024*16
+#define _YM_SET_SIZE 1024*1024*16
 
 struct bhead {
 	short int integrity_chk;
@@ -36,15 +36,15 @@ struct bhead {
 	void * prev;
 };
 
-void * _YMALLOC_AREA_STARTADDR;
-unsigned int SIZE;
+void * _ym_base;
+unsigned int _ym_size;
 
 void *HEAD, *TAIL;
 void *FOHEAD, *FOTAIL;
 void *FFHEAD, *FFTAIL;
 void *BHEAD, *BTAIL;
 
-int _YMALLOC_BLOCK_INITIALISED = 0;
+int _ym_init = 0;
 
 void 
 *_ymalloc_init(ssize_t size) 
@@ -56,30 +56,38 @@ void
 #endif
 
 	int zerofd = -1;
-	void * STARTADDR = NULL;
+	void * got_addr = NULL;
 
 	assert((zerofd = open("/dev/zero", O_RDWR, 0)) > 0);
 
-	STARTADDR = mmap(NULL, size, PROT_READ|PROT_WRITE, MAP_PRIVATE, zerofd, 0);
+#if defined(__linux__)
+
+	got_addr = mmap(NULL, size, PROT_READ|PROT_WRITE, MAP_PRIVATE, zerofd, 0);
+
+#elif defined(__unix__) || defined((__APPLE__) && defined(__MACH__))
+
+	got_addr = mmap(NULL, size, PROT_READ|PROT_WRITE, MAP_ANONYMOUS, -1, 0);
+
+#endif 
 
 	/* in case we fail to get memory */
-	assert(STARTADDR != MAP_FAILED || STARTADDR != NULL);
+	assert(got_addr != MAP_FAILED || got_addr != NULL);
 
 	/**
 	 * If sbrk() or mmap() prove to be too iffy to deal with, ask
 	 * for a managed chunk of heap politely from malloc, at which
 	 * point ymalloc() turns into more of a simulation
 	 *
-	 * void * _YMALLOC_AREA_STARTADDR = malloc(size);
+	 * void * got_addr = malloc(size);
 	 */
 
-	SIZE = size;
-	struct bhead * header = STARTADDR;
+	_ym_size = size;
+	struct bhead * header = got_addr;
 	header->integrity_chk = SHRT_MAX;
 	header->free = '1';
-	header->next = (STARTADDR + SIZE);
+	header->next = (got_addr + _ym_size);
  
-	return STARTADDR;
+	return got_addr;
 }
  
 void 
@@ -90,18 +98,18 @@ void
 		return NULL;
 	}
 
-	if(!_YMALLOC_BLOCK_INITIALISED) {
-		_YMALLOC_BLOCK_INITIALISED = 1;
-		_YMALLOC_AREA_STARTADDR = _ymalloc_init(YALLOC_BLOCK_SIZE);
+	if(!_ym_init) {
+		_ym_init = 1;
+		_ym_base = _ymalloc_init(_YM_SET_SIZE);
   	}
 
   	struct bhead * header;
-  	void * temp = _YMALLOC_AREA_STARTADDR;
+  	void * temp = _ym_base;
  	void * alloc_addr;
   	void * curr_next;
   	ssize_t blocksize;
   
-  	while(temp != (_YMALLOC_AREA_STARTADDR + SIZE)) {
+  	while(temp != (_ym_base + _ym_size)) {
 
 		header = temp;
 
@@ -146,7 +154,7 @@ void
 		}
 
 		/* sanity check - are we jumping out of our block? */
-		assert((temp = header->next) <= (_YMALLOC_AREA_STARTADDR + SIZE));
+		assert((temp = header->next) <= (_ym_base + _ym_size));
 	}
 
 	/* follow the malloc() spec and return NULL upon failure to allocate */
@@ -157,10 +165,10 @@ void
 merge()
 {
   	struct bhead * header, * next_header;
-  	void * temp = _YMALLOC_AREA_STARTADDR;
+  	void * temp = _ym_base;
   	void * next_block;
   
-  	while(temp != (_YMALLOC_AREA_STARTADDR + SIZE)) {
+  	while(temp != (_ym_base + _ym_size)) {
 		header = temp;
   
 		assert("[<-yfree] integrity check" && (header->integrity_chk == SHRT_MAX));
@@ -175,7 +183,7 @@ merge()
 	  		header->next = next_header->next;    
 		} 
 
-		assert((temp = header->next) <= (_YMALLOC_AREA_STARTADDR + SIZE));
+		assert((temp = header->next) <= (_ym_base + _ym_size));
   	}
 }
 
@@ -183,11 +191,11 @@ void
 yfree(void * addr)
 {
   	struct bhead * header;
-  	void * temp = _YMALLOC_AREA_STARTADDR;
+  	void * temp = _ym_base;
 
 	int visited = 0;
 
-  	while(temp != (_YMALLOC_AREA_STARTADDR + SIZE)) {
+  	while(temp != (_ym_base + _ym_size)) {
 		header = temp;
 
 		assert("integrity check" && (header->integrity_chk == SHRT_MAX));
@@ -210,7 +218,7 @@ yfree(void * addr)
 		}
 
 		/* sanity check - are we jumping out of our block? */
-		assert((temp = header->next) <= (_YMALLOC_AREA_STARTADDR + SIZE)); 
+		assert((temp = header->next) <= (_ym_base + _ym_size)); 
   	}
 
 	if(visited == 0) {
@@ -222,12 +230,12 @@ void
 yfree_safe(void *addr)
 {
   	struct bhead * header;
-  	void * temp = _YMALLOC_AREA_STARTADDR;
+  	void * temp = _ym_base;
 	ssize_t blocksize;
 
 	int visited = 0;
 
-  	while(temp != (_YMALLOC_AREA_STARTADDR + SIZE)) {
+  	while(temp != (_ym_base + _ym_size)) {
 		header = temp;
 
 		assert("integrity check" && (header->integrity_chk == SHRT_MAX));
@@ -255,7 +263,7 @@ yfree_safe(void *addr)
 		}
 
 		/* sanity check - are we jumping out of our block? */
-		assert((temp = header->next) <= (_YMALLOC_AREA_STARTADDR + SIZE)); 
+		assert((temp = header->next) <= (_ym_base + _ym_size)); 
   	}
 
 	if(visited == 0) {
@@ -269,12 +277,12 @@ void
 mem_map()
 {
   	struct bhead * header;
- 	void * temp = _YMALLOC_AREA_STARTADDR;
+ 	void * temp = _ym_base;
   	ssize_t blocksize;
 
 	printf("\n");
 	printf("***ymalloc: allocation map***\n");
-  	while(temp != (_YMALLOC_AREA_STARTADDR + SIZE)) {
+  	while(temp != (_ym_base + _ym_size)) {
 		header = temp;
 
 		assert("integrity check" && (header->integrity_chk == SHRT_MAX));
@@ -288,7 +296,7 @@ mem_map()
 		printf("Block size: %ld\n", blocksize);
 		printf("-------------------\n\n");
  
-		assert((temp = header->next) <= (_YMALLOC_AREA_STARTADDR + SIZE));
+		assert((temp = header->next) <= (_ym_base + _ym_size));
   	}
 
 	printf("\n");
@@ -317,10 +325,10 @@ ymalloc_summary()
 
 	float pcfree = 0;
 
-	void * temp = _YMALLOC_AREA_STARTADDR;
+	void * temp = _ym_base;
 	struct bhead *header;	
 
-	while (temp != (_YMALLOC_AREA_STARTADDR + SIZE)) {
+	while (temp != (_ym_base + _ym_size)) {
 		header = temp;
 
 		assert("integrity check" && (header->integrity_chk == SHRT_MAX));
@@ -340,7 +348,7 @@ ymalloc_summary()
 
 		sz_total += sizeof(struct bhead) + blocksize;
 
-		assert((temp = header->next) <= (_YMALLOC_AREA_STARTADDR + SIZE));
+		assert((temp = header->next) <= (_ym_base + _ym_size));
 	}
 
 	pcfree = ((float)(sz_total - (sz_blkoc + sz_headr)) / (float)sz_total) * 100;
